@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сканирование вывески и Google Maps</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f0f0;
+      text-align: center;
+    }
+    video, canvas {
+      max-width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #canvas {
+      display: none;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 1em;
+      cursor: pointer;
+    }
+    p {
+      margin-top: 15px;
+      font-size: 1em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Сканирование вывески</h1>
+  <video id="video" width="320" height="240" autoplay></video>
+  <canvas id="canvas" width="320" height="240"></canvas>
+  <br>
+  <button id="capture">Сканировать вывеску</button>
+  <p id="status">Статус: готов</p>
+
+  <!-- Подключаем Tesseract.js -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const captureButton = document.getElementById('capture');
+    const statusEl = document.getElementById('status');
+
+    // Запускаем камеру (предпочтительно заднюю, если доступна)
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(stream => {
+        video.srcObject = stream;
+        video.play();
+      })
+      .catch(err => {
+        console.error("Ошибка доступа к камере: ", err);
+        statusEl.textContent = "Ошибка доступа к камере: " + err;
+      });
+
+    captureButton.addEventListener('click', () => {
+      statusEl.textContent = "Сканирование...";
+      // Рисуем текущий кадр видео на canvas
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Преобразуем canvas в DataURL
+      const imageData = canvas.toDataURL('image/png');
+      
+      // Запускаем Tesseract для распознавания текста
+      Tesseract.recognize(
+        imageData,
+        'rus', // язык распознавания
+        { logger: m => console.log(m) }
+      ).then(({ data: { text } }) => {
+        statusEl.textContent = "Распознанный текст: " + text.trim();
+        // Формируем поисковый запрос для Google Maps
+        const query = encodeURIComponent(text.trim());
+        if (query) {
+          // Открываем Google Maps с поиском по распознанному тексту
+          window.location.href = "https://www.google.com/maps/search/?api=1&query=" + query;
+        } else {
+          statusEl.textContent = "Текст не распознан. Попробуйте снова.";
+        }
+      }).catch(err => {
+        console.error(err);
+        statusEl.textContent = "Ошибка при распознавании текста.";
+      });
+    });
+  </script>
+</body>
+</html>
