@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Сканирование вывески и Google Maps</title>
+  <title>Сканирование вывески (рус/англ) и поиск на Google Maps</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -15,9 +15,11 @@
       max-width: 100%;
       border: 1px solid #ccc;
       border-radius: 4px;
+      margin-top: 10px;
     }
+    /* Показываем canvas, чтобы видеть результат и bounding-боксы */
     #canvas {
-      display: none;
+      display: block;
     }
     button {
       margin-top: 20px;
@@ -32,14 +34,14 @@
   </style>
 </head>
 <body>
-  <h1>Сканирование вывески</h1>
+  <h1>Сканирование вывески (рус/англ)</h1>
   <video id="video" width="320" height="240" autoplay></video>
   <canvas id="canvas" width="320" height="240"></canvas>
   <br>
   <button id="capture">Сканировать вывеску</button>
   <p id="status">Статус: готов</p>
 
-  <!-- Подключаем Tesseract.js -->
+  <!-- Подключаем Tesseract.js (версия 2.x) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
   <script>
     const video = document.getElementById('video');
@@ -47,7 +49,10 @@
     const captureButton = document.getElementById('capture');
     const statusEl = document.getElementById('status');
 
-    // Запускаем камеру (предпочтительно заднюю, если доступна)
+    let userLat = null;
+    let userLng = null;
+
+    // 1. Запрашиваем доступ к камере (предпочтительно задняя)
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       .then(stream => {
         video.srcObject = stream;
@@ -58,32 +63,71 @@
         statusEl.textContent = "Ошибка доступа к камере: " + err;
       });
 
+    // 2. Запрашиваем геолокацию пользователя
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          userLat = position.coords.latitude;
+          userLng = position.coords.longitude;
+          console.log("Получено местоположение:", userLat, userLng);
+        },
+        (error) => {
+          console.error("Ошибка получения геолокации:", error);
+          // Если местоположение не доступно, можно продолжать без него
+        }
+      );
+    } else {
+      console.error("Геолокация не поддерживается этим браузером.");
+    }
+
+    // 3. Сканируем (делаем снимок и распознаём)
     captureButton.addEventListener('click', () => {
       statusEl.textContent = "Сканирование...";
+      
       // Рисуем текущий кадр видео на canvas
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
+
       // Преобразуем canvas в DataURL
       const imageData = canvas.toDataURL('image/png');
-      
-      // Запускаем Tesseract для распознавания текста
+
+      // Запускаем Tesseract для распознавания текста (русский + английский)
       Tesseract.recognize(
         imageData,
-        'rus', // язык распознавания
+        'eng+rus',  // указываем языки: английский + русский
         { logger: m => console.log(m) }
-      ).then(({ data: { text } }) => {
-        statusEl.textContent = "Распознанный текст: " + text.trim();
-        // Формируем поисковый запрос для Google Maps
-        const query = encodeURIComponent(text.trim());
-        if (query) {
-          // Открываем Google Maps с поиском по распознанному тексту
-          window.location.href = "https://www.google.com/maps/search/?api=1&query=" + query;
-        } else {
+      ).then(({ data }) => {
+        // data.text — итоговый распознанный текст
+        // data.words — список слов с координатами (bbox)
+
+        const recognizedText = data.text.trim();
+        if (!recognizedText) {
           statusEl.textContent = "Текст не распознан. Попробуйте снова.";
+          return;
         }
-      }).catch(err => {
-        console.error(err);
+        statusEl.textContent = "Распознанный текст: " + recognizedText;
+
+        // 4. Рисуем bounding-боксы на canvas вокруг каждого распознанного слова
+        data.words.forEach(word => {
+          const { x0, y0, x1, y1 } = word.bbox;
+          context.strokeStyle = 'red';
+          context.lineWidth = 2;
+          context.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        });
+
+        // 5. Формируем поисковый запрос для Google Maps
+        // Если геолокация получена, добавляем "рядом со мной"
+        let finalQuery = recognizedText;
+        if (userLat && userLng) {
+          finalQuery += " рядом со мной";
+        }
+        const queryParam = encodeURIComponent(finalQuery);
+        
+        // Открываем Google Maps с поиском по запросу
+        window.location.href = "https://www.google.com/maps/search/?api=1&query=" + queryParam;
+      })
+      .catch(err => {
+        console.error("Ошибка при распознавании текста:", err);
         statusEl.textContent = "Ошибка при распознавании текста.";
       });
     });
